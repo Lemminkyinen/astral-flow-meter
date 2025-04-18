@@ -1,5 +1,7 @@
 # Astral Flow Meter
 
+![Astral Flow Meter Demo](./files/astral-flow-meter-demo.gif)
+
 Astral Flow Meter is a Rust-based application designed to log amperage data from Asus ROG Astral 5090/5080 GPUs. This project was created for personal use and is not officially supported or endorsed by Asus.
 
 > **Note:** This application only works with Nvidia Asus ROG Astral 5090/5080 GPUs. It is not compatible with other GPU models.
