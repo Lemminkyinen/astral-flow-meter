@@ -8,6 +8,7 @@ resolver = "3"
 embed-dll = []
 
 [dependencies]
+actix-web = "4.11.0"
 anyhow = "1.0.97"
 iced = { version = "0.13.1", features = ["canvas", "tokio"] }
 libloading = "0.8.6"

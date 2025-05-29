@@ -4,9 +4,9 @@ mod dll;
 mod logging;
 mod style;
 
+use actix_web::{App, HttpServer, Responder, dev::ServerHandle, web};
 #[cfg(feature = "embed-dll")]
 use dll::extract_dll;
-
 use dll::{ExpanMod, load_expan_module};
 use iced::{
     Alignment, Font, Subscription, Task, Theme, padding, time,
@@ -14,8 +14,12 @@ use iced::{
     window::Settings,
 };
 use logging::log_amp_data;
+use serde::Serialize;
 use std::{
     path::PathBuf,
+    sync::{Arc, Mutex},
+    thread,
+    thread::JoinHandle,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use style::{build_icon, styled_text};
@@ -72,7 +76,7 @@ fn main() -> Result<(), anyhow::Error> {
         .map_err(anyhow::Error::from)
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize)]
 pub struct AmperageData {
     pub gpu_index: i32,
     pub timestamp: u64,
@@ -81,13 +85,62 @@ pub struct AmperageData {
 }
 
 #[derive(Debug)]
+struct ActixServer {
+    thread_handle: JoinHandle<()>,
+    server_handle: ServerHandle,
+}
+
+impl ActixServer {
+    async fn get_amperage(data: web::Data<Arc<Mutex<AmperageData>>>) -> impl Responder {
+        let data = data.lock().unwrap();
+        actix_web::HttpResponse::Ok().json(&*data)
+    }
+
+    pub fn spawn(data: Arc<Mutex<AmperageData>>) -> Self {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let thread_handle = thread::spawn(move || {
+            let data = web::Data::new(data);
+            let sys = actix_web::rt::System::new();
+            sys.block_on(async move {
+                let server = HttpServer::new(move || {
+                    App::new()
+                        .app_data(data.clone())
+                        .route("/amperage", web::get().to(Self::get_amperage))
+                })
+                .bind(("0.0.0.0", 8080))
+                .unwrap()
+                .run();
+
+                tx.send(server.handle()).unwrap();
+
+                server.await.unwrap();
+            });
+        });
+        let server_handle = rx.recv().unwrap();
+
+        Self {
+            thread_handle,
+            server_handle,
+        }
+    }
+
+    pub fn close(self) {
+        // Block on the async stop future in a temporary Actix runtime
+        actix_web::rt::System::new().block_on(self.server_handle.stop(true));
+        // Wait for the server thread to finish
+        self.thread_handle.join().unwrap();
+    }
+}
+
+#[derive(Debug)]
 struct AppState {
     expan_module: Option<ExpanMod>,
-    amperage_data: AmperageData,
+    amperage_data: Arc<Mutex<AmperageData>>,
     polling_rate: Duration,
     slider_value_ms: u16,
     enable_logging: bool,
     log_path: PathBuf,
+    server: Option<ActixServer>,
 }
 
 impl AppState {
@@ -129,6 +182,10 @@ impl AppState {
             PathBuf::new()
         };
 
+        let amperage_data = Arc::new(Mutex::new(amperage_data));
+
+        let server = Some(ActixServer::spawn(amperage_data.clone()));
+
         (
             Self {
                 expan_module,
@@ -137,6 +194,7 @@ impl AppState {
                 enable_logging: false,
                 log_path: path,
                 slider_value_ms,
+                server,
             },
             Task::none(),
         )
@@ -150,7 +208,7 @@ impl AppState {
         match message {
             Message::UpdateAmpData => {
                 if let Some(expan_module) = &self.expan_module {
-                    match update_amp_data(expan_module, &mut self.amperage_data) {
+                    match update_amp_data(expan_module, &mut self.amperage_data.lock().unwrap()) {
                         Ok(data) => data,
                         Err(e) => {
                             tracing::error!("Failed to update amp data: {}", e);
@@ -158,7 +216,9 @@ impl AppState {
                     };
 
                     if self.enable_logging {
-                        if let Err(e) = log_amp_data(&self.log_path, &self.amperage_data) {
+                        if let Err(e) =
+                            log_amp_data(&self.log_path, &self.amperage_data.lock().unwrap())
+                        {
                             tracing::error!(
                                 "Failed to log data to {}: {}",
                                 self.log_path.display(),
@@ -212,6 +272,8 @@ impl AppState {
         // Create left column (first 3 pins)
         let left_column = column(
             self.amperage_data
+                .lock()
+                .unwrap()
                 .pin_value_buffer
                 .iter()
                 .take(3)
@@ -224,6 +286,8 @@ impl AppState {
         // Create right column (last 3 pins)
         let right_column = column(
             self.amperage_data
+                .lock()
+                .unwrap()
                 .pin_value_buffer
                 .iter()
                 .skip(3)
