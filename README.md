@@ -1,4 +1,4 @@
-# Astral Flow Meter
+# Astral Flow Meter (for ROG Astral 5080/5090 GPUs)
 
 ![Astral Flow Meter Demo](./files/astral-flow-meter-demo.gif)
 
