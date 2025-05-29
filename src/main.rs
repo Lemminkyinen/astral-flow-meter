@@ -4,6 +4,9 @@ mod dll;
 mod logging;
 mod style;
 
+#[cfg(feature = "embed-dll")]
+use dll::extract_dll;
+
 use dll::{ExpanMod, load_expan_module};
 use iced::{
     Alignment, Font, Subscription, Task, Theme, padding, time,
@@ -51,6 +54,9 @@ fn main() -> Result<(), anyhow::Error> {
     tracing_subscriber::fmt::init();
     tracing::info!("Starting astral-flow-meter application!");
 
+    #[cfg(feature = "embed-dll")]
+    extract_dll()?;
+
     iced::application("Astral Amp Info", AppState::update, AppState::view)
         .subscription(AppState::subscription)
         .window(Settings {
@@ -86,7 +92,16 @@ struct AppState {
 
 impl AppState {
     fn new() -> (Self, Task<Message>) {
+        #[cfg(feature = "embed-dll")]
+        let dll_path = {
+            let mut dll_path = get_temp_path().expect("Temp path should be available");
+            dll_path.push("ExpanModule_temp.dll");
+            dll_path
+        };
+
         let paths = [
+            #[cfg(feature = "embed-dll")]
+            dll_path,
             PathBuf::from("ExpanModule.dll"),
             PathBuf::from(r"C:\Program Files (x86)\ASUS\GPUTweakIII\ExpanModule.dll"),
         ];

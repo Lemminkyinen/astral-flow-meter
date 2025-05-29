@@ -36,10 +36,15 @@ This application requires the proprietary `ExpanModule.dll` from Asus GPU Tweak 
    rustup target add i686-pc-windows-msvc
    cargo build --release --target=i686-pc-windows-msvc
    ```
+4. Optionally build the project with with embedded ``ExpanModule.dll``. Requires the .dll file to be in the repository root:
+   ```bash
+   rustup target add i686-pc-windows-msvc
+   cargo build --release --target=i686-pc-windows-msvc -F embed-dll
+   ```
 
-4. Place the `ExpanModule.dll` file in the same directory as the executable or ensure it is located in the default directory: `C:\Program Files (x86)\ASUS\GPUTweakIII\ExpanModule.dll`.
+5. Place the `ExpanModule.dll` file in the same directory as the executable or ensure it is located in the default directory: `C:\Program Files (x86)\ASUS\GPUTweakIII\ExpanModule.dll`.
 
-5. Run the built binary.
+6. Run the built binary.
 
 ## Usage
 The application will attempt to load the ExpanModule.dll from the following locations in order:

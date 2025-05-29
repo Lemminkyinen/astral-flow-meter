@@ -5,7 +5,8 @@ use std::path::PathBuf;
 type ExpanApiGetPowerStatus = unsafe extern "C" fn(gpu_index: i32, power_status: *mut f32) -> i32;
 
 // Embed the DLL directly in the binary
-// const DLL_BYTES: &[u8] = include_bytes!("../assets/ExpanModule.dll");
+#[cfg(feature = "embed-dll")]
+const DLL_BYTES: &[u8] = include_bytes!("../ExpanModule.dll");
 
 #[derive(Debug)]
 pub struct ExpanMod {
@@ -50,13 +51,16 @@ impl Drop for ExpanMod {
     }
 }
 
-// fn extract_dll() -> Result<PathBuf, anyhow::Error> {
-//     // Extract DLL to a temp file
-//     let mut dll_path = get_temp_path()?;
-//     dll_path.push("ExpanModule_temp.dll");
-//     fs::write(&dll_path, DLL_BYTES)?;
-//     Ok(dll_path)
-// }
+#[cfg(feature = "embed-dll")]
+pub fn extract_dll() -> Result<PathBuf, anyhow::Error> {
+    // Extract DLL to a temp file
+    use crate::get_temp_path;
+    use std::fs;
+    let mut dll_path = get_temp_path()?;
+    dll_path.push("ExpanModule_temp.dll");
+    fs::write(&dll_path, DLL_BYTES)?;
+    Ok(dll_path)
+}
 
 fn load_dll(path: &PathBuf) -> Result<Library, anyhow::Error> {
     // Load the DLL

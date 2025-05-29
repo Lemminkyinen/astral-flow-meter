@@ -2,6 +2,10 @@
 name = "astral-flow-meter"
 version = "0.1.0"
 edition = "2024"
+resolver = "3"
+
+[features]
+embed-dll = []
 
 [dependencies]
 anyhow = "1.0.97"
