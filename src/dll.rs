@@ -1,5 +1,5 @@
 use libloading::{Library, Symbol};
-use std::{fs, path::PathBuf};
+use std::path::PathBuf;
 
 // Define the function signature for Expan_Api_GetPowerStatus
 type ExpanApiGetPowerStatus = unsafe extern "C" fn(gpu_index: i32, power_status: *mut f32) -> i32;
@@ -16,7 +16,7 @@ pub struct ExpanMod {
 impl ExpanMod {
     pub fn new(path: &PathBuf) -> Result<Self, anyhow::Error> {
         // let path = extract_dll()?;
-        let library = load_dll(&path)?;
+        let library = load_dll(path)?;
         Ok(Self {
             library: Some(library),
             path: path.clone(),
