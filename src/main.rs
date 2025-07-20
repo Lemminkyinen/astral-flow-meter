@@ -33,7 +33,7 @@ fn get_temp_path() -> Result<PathBuf, anyhow::Error> {
 }
 
 fn update_amp_data(expan_mod: &ExpanMod, amp_data: &mut AmperageData) -> Result<(), anyhow::Error> {
-    let res = expan_mod.get_amperage_info(amp_data.gpu_index, &mut amp_data.pin_value_buffer)?;
+    let res = expan_mod.get_amperage_info(&mut amp_data.pin_value_buffer, None)?;
     if res != 0 {
         tracing::warn!(
             "Failed to fetch data: {:?}, {}",
@@ -74,7 +74,6 @@ fn main() -> Result<(), anyhow::Error> {
 
 #[derive(Debug, Clone, Default)]
 pub struct AmperageData {
-    pub gpu_index: i32,
     pub timestamp: u64,
     pub pin_value_buffer: [f32; 6],
     pub status_code: i32,
@@ -106,11 +105,7 @@ impl AppState {
             PathBuf::from(r"C:\Program Files (x86)\ASUS\GPUTweakIII\ExpanModule.dll"),
         ];
         let expan_module = load_expan_module(&paths);
-
-        let mut amperage_data = AmperageData {
-            gpu_index: 1,
-            ..Default::default()
-        };
+        let mut amperage_data = AmperageData::default();
         if let Some(expan_mod) = expan_module.as_ref() {
             if let Err(e) = update_amp_data(expan_mod, &mut amperage_data) {
                 tracing::error!("Failed to fetch amperage data in the beginning: {}", e);
@@ -185,7 +180,7 @@ impl AppState {
                 let mut amperage_data = AmperageData::default();
                 if let Some(expan_mod) = expan_module.as_ref() {
                     if let Err(e) =
-                        expan_mod.get_amperage_info(1, &mut amperage_data.pin_value_buffer)
+                        expan_mod.get_amperage_info(&mut amperage_data.pin_value_buffer, None)
                     {
                         tracing::error!("Failed to get amperage data: {}", e);
                     }

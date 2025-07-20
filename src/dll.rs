@@ -12,28 +12,48 @@ const DLL_BYTES: &[u8] = include_bytes!("../ExpanModule.dll");
 pub struct ExpanMod {
     library: Option<Library>,
     path: PathBuf,
+    gpu_idx: i32,
 }
 
 impl ExpanMod {
     pub fn new(path: &PathBuf) -> Result<Self, anyhow::Error> {
         // let path = extract_dll()?;
         let library = load_dll(path)?;
-        Ok(Self {
+        let mut s = Self {
             library: Some(library),
             path: path.clone(),
-        })
+            gpu_idx: 0,
+        };
+
+        s.gpu_idx = s.find_gpu_idx()?;
+
+        Ok(s)
+    }
+
+    fn find_gpu_idx(&self) -> Result<i32, anyhow::Error> {
+        let mut buf = [0f32; 6];
+        for index in -255..255 {
+            if let Ok(ec) = self.get_amperage_info(&mut buf, Some(index))
+                && ec == 0
+            {
+                return Ok(index);
+            }
+        }
+
+        Err(anyhow::Error::msg("Failed to find a valid GPU index"))
     }
 
     pub fn get_amperage_info(
         &self,
-        gpu_index: i32,
         pin_value_buffer: &mut [f32; 6],
+        gpu_idx: Option<i32>,
     ) -> Result<i32, anyhow::Error> {
+        let gpu_idx = gpu_idx.unwrap_or(self.gpu_idx);
         if let Some(lib) = &self.library {
             // Get the raw function pointer
             let get_power_status: Symbol<ExpanApiGetPowerStatus> =
                 unsafe { lib.get(b"Expan_Api_GetPowerStatus") }.map_err(anyhow::Error::new)?;
-            let ec = unsafe { get_power_status(gpu_index, pin_value_buffer.as_mut_ptr()) };
+            let ec = unsafe { get_power_status(gpu_idx, pin_value_buffer.as_mut_ptr()) };
             Ok(ec)
         } else {
             Err(anyhow::Error::msg("Library is none!"))
