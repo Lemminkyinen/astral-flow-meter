@@ -15,6 +15,7 @@ use iced::{
     window::Settings,
 };
 use logging::log_amp_data;
+use serde::Serialize;
 use std::{
     path::PathBuf,
     sync::{Arc, OnceLock, RwLock},
@@ -64,11 +65,6 @@ fn main() -> Result<(), anyhow::Error> {
     let metrics = Arc::new(RwLock::new(AmperageData::default()));
     METRICS.set(metrics.clone()).expect("Failed to set METRICS");
 
-    std::thread::spawn(move || {
-        let rt = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");
-        rt.block_on(server::run(metrics));
-    });
-
     iced::application("Astral Amp Info", AppState::update, AppState::view)
         .subscription(AppState::subscription)
         .window(Settings {
@@ -84,7 +80,7 @@ fn main() -> Result<(), anyhow::Error> {
         .map_err(anyhow::Error::from)
 }
 
-#[derive(Debug, Clone, Default, serde::Serialize)]
+#[derive(Debug, Clone, Default, Serialize)]
 pub struct AmperageData {
     pub timestamp: u64,
     pub pin_value_buffer: [f32; 6],
@@ -98,7 +94,9 @@ struct AppState {
     polling_rate: Duration,
     slider_value_ms: u16,
     enable_logging: bool,
+    enable_server: bool,
     log_path: PathBuf,
+    server_handle: Option<tokio::task::AbortHandle>,
 }
 
 impl AppState {
@@ -142,8 +140,10 @@ impl AppState {
                 amperage_data,
                 polling_rate,
                 enable_logging: false,
+                enable_server: false,
                 log_path: path,
                 slider_value_ms,
+                server_handle: None,
             },
             Task::none(),
         )
@@ -153,7 +153,7 @@ impl AppState {
         time::every(self.polling_rate).map(|_| Message::UpdateAmpData)
     }
 
-    fn update(&mut self, message: Message) {
+    fn update(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::UpdateAmpData => {
                 if let Some(expan_module) = &self.expan_module {
@@ -184,6 +184,33 @@ impl AppState {
             Message::ToggleLogging(value) => {
                 self.enable_logging = value;
             }
+            Message::ToggleServer(value) => {
+                match (value, self.server_handle.take()) {
+                    // Start the server in background
+                    (true, None) => {
+                        if let Some(metrics) = METRICS.get() {
+                            let metrics = metrics.clone();
+                            let handle = tokio::spawn(async move {
+                                server::run(metrics).await;
+                            });
+                            self.server_handle = Some(handle.abort_handle());
+                        }
+                    }
+                    // The server is already on, actions not needed
+                    (true, Some(handle)) => {
+                        self.server_handle = Some(handle);
+                    }
+                    // The server is already off, actions not needed
+                    (false, None) => {}
+                    // Shutdown the server
+                    (false, Some(handle)) => {
+                        handle.abort();
+                    }
+                }
+
+                // Set value to app state
+                self.enable_server = value;
+            }
             Message::LogPathChanged(path) => {
                 let log_path = PathBuf::from(path);
                 self.log_path = log_path;
@@ -204,6 +231,7 @@ impl AppState {
                 self.expan_module = expan_module;
             }
         }
+        Task::none()
     }
 
     fn view(&'_ self) -> Container<'_, Message> {
@@ -277,14 +305,22 @@ impl AppState {
         )
         .padding(padding::bottom(15));
 
-        let checkbox_ = checkbox("Enable logging", self.enable_logging)
+        let logging_checkbox = checkbox("Enable logging", self.enable_logging)
             .on_toggle(Message::ToggleLogging)
+            .font(Font::with_name("Inter 24pt"));
+
+        let server_checkbox = checkbox("Enable server", self.enable_server)
+            .on_toggle(Message::ToggleServer)
             .font(Font::with_name("Inter 24pt"));
 
         container(column!(
             row![pins],
             row![column!(current_slider_value, slider_)].padding(padding::left(20).top(0)),
-            row![column!(logging_path, checkbox_)].padding(padding::left(20).bottom(20).top(15))
+            row![column!(
+                logging_path,
+                row![logging_checkbox, server_checkbox].spacing(20)
+            )]
+            .padding(padding::left(20).bottom(20).top(15))
         ))
     }
 }
@@ -294,6 +330,7 @@ enum Message {
     UpdateAmpData,
     LogPathChanged(String),
     ToggleLogging(bool),
+    ToggleServer(bool),
     SliderChanged(u16),
     ExpanModulePathChanged(String),
 }
