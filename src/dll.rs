@@ -63,10 +63,10 @@ impl ExpanMod {
 
 impl Drop for ExpanMod {
     fn drop(&mut self) {
-        if let Some(lib) = self.library.take() {
-            if let Err(e) = lib.close() {
-                eprintln!("Failed to close dll library: {}", e);
-            };
+        if let Some(lib) = self.library.take()
+            && let Err(e) = lib.close()
+        {
+            eprintln!("Failed to close dll library: {}", e);
         };
     }
 }

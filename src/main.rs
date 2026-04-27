@@ -152,14 +152,10 @@ impl AppState {
                         }
                     };
 
-                    if self.enable_logging {
-                        if let Err(e) = log_amp_data(&self.log_path, &self.amperage_data) {
-                            tracing::error!(
-                                "Failed to log data to {}: {}",
-                                self.log_path.display(),
-                                e
-                            );
-                        }
+                    if self.enable_logging
+                        && let Err(e) = log_amp_data(&self.log_path, &self.amperage_data)
+                    {
+                        tracing::error!("Failed to log data to {}: {}", self.log_path.display(), e);
                     }
                 }
             }
@@ -192,7 +188,7 @@ impl AppState {
         }
     }
 
-    fn view(&self) -> Container<Message> {
+    fn view(&'_ self) -> Container<'_, Message> {
         if self.expan_module.is_none() {
             let text = text("Please provide ExpanModule.dll path:");
             let expan_module_path = container(
