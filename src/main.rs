@@ -18,7 +18,7 @@ use logging::log_amp_data;
 use serde::Serialize;
 use std::{
     path::PathBuf,
-    sync::{Arc, OnceLock, RwLock},
+    sync::{Arc, RwLock},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use style::{build_icon, styled_text};
@@ -36,6 +36,8 @@ fn get_temp_path() -> Result<PathBuf, anyhow::Error> {
 }
 
 fn update_amp_data(expan_mod: &ExpanMod, amp_data: &mut AmperageData) -> Result<(), anyhow::Error> {
+    // let mut data = amp_data.write().unwrap();
+
     let res = expan_mod.get_amperage_info(&mut amp_data.pin_value_buffer, None)?;
     if res != 0 {
         tracing::warn!(
@@ -53,17 +55,12 @@ fn update_amp_data(expan_mod: &ExpanMod, amp_data: &mut AmperageData) -> Result<
     Ok(())
 }
 
-static METRICS: OnceLock<Arc<RwLock<AmperageData>>> = OnceLock::new();
-
 fn main() -> Result<(), anyhow::Error> {
     tracing_subscriber::fmt::init();
     tracing::info!("Starting astral-flow-meter application!");
 
     #[cfg(feature = "embed-dll")]
     extract_dll()?;
-
-    let metrics = Arc::new(RwLock::new(AmperageData::default()));
-    METRICS.set(metrics.clone()).expect("Failed to set METRICS");
 
     iced::application("Astral Amp Info", AppState::update, AppState::view)
         .subscription(AppState::subscription)
@@ -90,7 +87,7 @@ pub struct AmperageData {
 #[derive(Debug)]
 struct AppState {
     expan_module: Option<ExpanMod>,
-    amperage_data: AmperageData,
+    amperage_data: Arc<RwLock<AmperageData>>,
     polling_rate: Duration,
     slider_value_ms: u16,
     enable_logging: bool,
@@ -137,7 +134,7 @@ impl AppState {
         (
             Self {
                 expan_module,
-                amperage_data,
+                amperage_data: Arc::new(RwLock::new(amperage_data)),
                 polling_rate,
                 enable_logging: false,
                 enable_server: false,
@@ -157,21 +154,18 @@ impl AppState {
         match message {
             Message::UpdateAmpData => {
                 if let Some(expan_module) = &self.expan_module {
-                    match update_amp_data(expan_module, &mut self.amperage_data) {
-                        Ok(_) => {
-                            if let Some(metrics) = METRICS.get()
-                                && let Ok(mut data) = metrics.write()
-                            {
-                                *data = self.amperage_data.clone();
-                            }
-                        }
-                        Err(e) => {
+                    {
+                        // Use a scope for the write lock
+                        let mut amp_data = self.amperage_data.write().unwrap();
+                        if let Err(e) = update_amp_data(expan_module, &mut amp_data) {
                             tracing::error!("Failed to update amp data: {}", e);
-                        }
-                    };
+                        };
+                    }
 
+                    // Downgrade to a read lock
+                    let amp_data = self.amperage_data.read().unwrap();
                     if self.enable_logging
-                        && let Err(e) = log_amp_data(&self.log_path, &self.amperage_data)
+                        && let Err(e) = log_amp_data(&self.log_path, &amp_data)
                     {
                         tracing::error!("Failed to log data to {}: {}", self.log_path.display(), e);
                     }
@@ -188,13 +182,11 @@ impl AppState {
                 match (value, self.server_handle.take()) {
                     // Start the server in background
                     (true, None) => {
-                        if let Some(metrics) = METRICS.get() {
-                            let metrics = metrics.clone();
-                            let handle = tokio::spawn(async move {
-                                server::run(metrics).await;
-                            });
-                            self.server_handle = Some(handle.abort_handle());
-                        }
+                        let amp_data = Arc::clone(&self.amperage_data);
+                        let handle = tokio::spawn(async move {
+                            server::run(amp_data).await;
+                        });
+                        self.server_handle = Some(handle.abort_handle());
                     }
                     // The server is already on, actions not needed
                     (true, Some(handle)) => {
@@ -249,6 +241,8 @@ impl AppState {
         // Create left column (first 3 pins)
         let left_column = column(
             self.amperage_data
+                .read()
+                .unwrap()
                 .pin_value_buffer
                 .iter()
                 .take(3)
@@ -261,6 +255,8 @@ impl AppState {
         // Create right column (last 3 pins)
         let right_column = column(
             self.amperage_data
+                .read()
+                .unwrap()
                 .pin_value_buffer
                 .iter()
                 .skip(3)
