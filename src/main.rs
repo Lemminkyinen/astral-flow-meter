@@ -23,7 +23,8 @@ use std::{
 };
 use style::{build_icon, styled_text};
 
-const INTER_REGULAR: &[u8] = include_bytes!("../fonts/Inter_24pt-Regular.ttf");
+const INTER_24PT_REGULAR: &[u8] = include_bytes!("../fonts/Inter_24pt-Regular.ttf");
+const INTER_18PT_REGULAR: &[u8] = include_bytes!("../fonts/Inter_18pt-Regular.ttf");
 
 fn get_temp_path() -> Result<PathBuf, anyhow::Error> {
     let mut path = match std::env::var_os("LOCALAPPDATA") {
@@ -71,7 +72,8 @@ fn main() -> Result<(), anyhow::Error> {
             icon: Some(build_icon()?),
             ..Default::default()
         })
-        .font(INTER_REGULAR)
+        .font(INTER_24PT_REGULAR)
+        .font(INTER_18PT_REGULAR)
         .theme(|_| Theme::Dark)
         .run_with(AppState::new)
         .map_err(anyhow::Error::from)
@@ -90,6 +92,8 @@ struct AppState {
     amperage_data: Arc<RwLock<AmperageData>>,
     polling_rate: Duration,
     slider_value_ms: u16,
+    server_port: u16,
+    server_port_str: String,
     enable_logging: bool,
     enable_server: bool,
     log_path: PathBuf,
@@ -138,6 +142,8 @@ impl AppState {
                 polling_rate,
                 enable_logging: false,
                 enable_server: false,
+                server_port: 3000,
+                server_port_str: String::from("3000"),
                 log_path: path,
                 slider_value_ms,
                 server_handle: None,
@@ -183,8 +189,9 @@ impl AppState {
                     // Start the server in background
                     (true, None) => {
                         let amp_data = Arc::clone(&self.amperage_data);
+                        let port = self.server_port;
                         let handle = tokio::spawn(async move {
-                            server::run(amp_data).await;
+                            server::run(amp_data, port).await;
                         });
                         self.server_handle = Some(handle.abort_handle());
                     }
@@ -202,6 +209,14 @@ impl AppState {
 
                 // Set value to app state
                 self.enable_server = value;
+            }
+            Message::PortChanged(port) => {
+                self.server_port_str = port.trim().to_string();
+                if let Ok(p) = self.server_port_str.parse()
+                    && (1..=65535).contains(&p)
+                {
+                    self.server_port = p;
+                }
             }
             Message::LogPathChanged(path) => {
                 let log_path = PathBuf::from(path);
@@ -309,14 +324,20 @@ impl AppState {
             .on_toggle(Message::ToggleServer)
             .font(Font::with_name("Inter 24pt"));
 
+        let port_input = text_input("port", &self.server_port_str)
+            .on_input(Message::PortChanged)
+            .width(87)
+            .font(Font::with_name("Inter 18pt"))
+            .line_height(text::LineHeight::Absolute(12.into()));
+
         container(column!(
             row![pins],
             row![column!(current_slider_value, slider_)].padding(padding::left(20).top(0)),
             row![column!(
                 logging_path,
-                row![logging_checkbox, server_checkbox].spacing(20)
+                row![logging_checkbox, server_checkbox, port_input].spacing(10)
             )]
-            .padding(padding::left(20).bottom(20).top(15))
+            .padding(padding::left(20).bottom(15).top(15))
         ))
     }
 }
@@ -329,4 +350,5 @@ enum Message {
     ToggleServer(bool),
     SliderChanged(u16),
     ExpanModulePathChanged(String),
+    PortChanged(String),
 }
