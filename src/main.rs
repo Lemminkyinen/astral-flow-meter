@@ -2,6 +2,7 @@
 
 mod dll;
 mod logging;
+mod server;
 mod style;
 
 #[cfg(feature = "embed-dll")]
@@ -16,6 +17,7 @@ use iced::{
 use logging::log_amp_data;
 use std::{
     path::PathBuf,
+    sync::{Arc, OnceLock, RwLock},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use style::{build_icon, styled_text};
@@ -50,12 +52,22 @@ fn update_amp_data(expan_mod: &ExpanMod, amp_data: &mut AmperageData) -> Result<
     Ok(())
 }
 
+static METRICS: OnceLock<Arc<RwLock<AmperageData>>> = OnceLock::new();
+
 fn main() -> Result<(), anyhow::Error> {
     tracing_subscriber::fmt::init();
     tracing::info!("Starting astral-flow-meter application!");
 
     #[cfg(feature = "embed-dll")]
     extract_dll()?;
+
+    let metrics = Arc::new(RwLock::new(AmperageData::default()));
+    METRICS.set(metrics.clone()).expect("Failed to set METRICS");
+
+    std::thread::spawn(move || {
+        let rt = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");
+        rt.block_on(server::run(metrics));
+    });
 
     iced::application("Astral Amp Info", AppState::update, AppState::view)
         .subscription(AppState::subscription)
@@ -72,7 +84,7 @@ fn main() -> Result<(), anyhow::Error> {
         .map_err(anyhow::Error::from)
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, serde::Serialize)]
 pub struct AmperageData {
     pub timestamp: u64,
     pub pin_value_buffer: [f32; 6],
@@ -146,7 +158,13 @@ impl AppState {
             Message::UpdateAmpData => {
                 if let Some(expan_module) = &self.expan_module {
                     match update_amp_data(expan_module, &mut self.amperage_data) {
-                        Ok(data) => data,
+                        Ok(_) => {
+                            if let Some(metrics) = METRICS.get()
+                                && let Ok(mut data) = metrics.write()
+                            {
+                                *data = self.amperage_data.clone();
+                            }
+                        }
                         Err(e) => {
                             tracing::error!("Failed to update amp data: {}", e);
                         }
